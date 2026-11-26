@@ -118,7 +118,10 @@ package struct ClaudeClient: Sendable {
     }
     let encoder = JSONEncoder()
     encoder.outputFormatting = .sortedKeys
-    req.httpBody = try encoder.encode(body)
+    // Sorted keys keep the body deterministic, but a schema's `properties`
+    // must keep their declaration order: under `output_config.format` the
+    // model generates them in the order they are sent.
+    req.httpBody = try JSONValue.orderedData(from: encoder.encode(body))
     return req
   }
 

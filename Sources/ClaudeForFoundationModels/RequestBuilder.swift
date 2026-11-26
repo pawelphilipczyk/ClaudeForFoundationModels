@@ -269,6 +269,10 @@ enum RequestBuilder {
     "type", "properties", "required", "items", "enum", "const",
     "anyOf", "allOf", "oneOf", "$ref", "$defs", "definitions",
     "description", "format", "additionalProperties",
+    // Kept so the request writer can send `properties` in declaration order
+    // (the model generates them in that order); the writer drops the key
+    // itself, since the API rejects it. See `JSONValue.orderedData(from:)`.
+    "x-order",
   ]
 
   /// Keys whose values are `{name: schema}` maps — the names are arbitrary

@@ -145,8 +145,9 @@ import Testing
       return
     }
     #expect(props["city"] != nil)
-    // Apple-internal extension keys would 400 the API's strict validator.
-    #expect(schema["x-order"] == nil)
+    // Apple-internal extension keys would 400 the API's strict validator;
+    // `x-order` stays until the request writer orders by it and drops it.
+    #expect(schema["x-order"] != nil)
     #expect(schema["title"] == nil)
     // The API requires additionalProperties: false on every object.
     #expect(schema["additionalProperties"] == .bool(false))
@@ -162,13 +163,50 @@ import Testing
     )
     let built = try RequestBuilder.build(from: request, model: .sonnet4_6)
     let format = try #require(built.request.outputConfig?.format)
-    let data = try JSONEncoder().encode(format.schema)
+    let data = try JSONValue.orderedData(from: JSONEncoder().encode(format.schema))
     let json = String(decoding: data, as: UTF8.self)
     #expect(!json.contains("x-order"))
     #expect(!json.contains(#""title":"#))
     // Property names survive — they're arbitrary, not schema vocabulary.
     #expect(json.contains(#""inner":"#))
     #expect(json.contains(#""value":"#))
+  }
+
+  @Test func `properties are sent in declaration order, without x-order`() throws {
+    // Under output_config.format the model generates properties in the order
+    // they are sent, so a reason declared before its decision must stay
+    // before it (issue #30). Alphabetically every pair here would flip.
+    let request = LanguageModelExecutorGenerationRequest.make(
+      transcript: Transcript(entries: [
+        .prompt(.init(segments: [.text(.init(content: "Hi"))]))
+      ]),
+      schema: OrderedArgs.generationSchema
+    )
+    let built = try RequestBuilder.build(from: request, model: .sonnet4_6)
+    let format = try #require(built.request.outputConfig?.format)
+    // Several encodes: hash order changes per launch, so one could pass by luck.
+    for _ in 0..<5 {
+      let data = try JSONValue.orderedData(from: JSONEncoder().encode(format.schema))
+      let json = String(decoding: data, as: UTF8.self)
+      #expect(!json.contains("x-order"))
+      let positions = ["zNotes", "yDecision", "xNotes", "wDecision"]
+        .map {
+          json.range(of: "\"\($0)\":")?.lowerBound
+        }
+      #expect(positions.allSatisfy { $0 != nil })
+      #expect(positions.compactMap { $0 } == positions.compactMap { $0 }.sorted())
+    }
+  }
+
+  @Test func `ordered writing keeps other keys sorted and whole numbers whole`() throws {
+    let data = try JSONValue.orderedData(
+      from: Data(#"{"b":1024,"a":[0.5,true,null,"x\"y"],"x-order":["q"]}"#.utf8)
+    )
+    // Without a sibling `properties`, `x-order` is ordinary data and stays.
+    #expect(
+      String(decoding: data, as: UTF8.self)
+        == #"{"a":[0.5,true,null,"x\"y"],"b":1024,"x-order":["q"]}"#
+    )
   }
 
   @Test func `reasoningLevel maps to effort`() throws {
@@ -1250,4 +1288,12 @@ private struct NestedArgs {
 @Generable
 private struct NestedInner {
   var value: String
+}
+
+@Generable
+private struct OrderedArgs {
+  var zNotes: String
+  var yDecision: String
+  var xNotes: String
+  var wDecision: String
 }
